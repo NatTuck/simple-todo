@@ -1,6 +1,6 @@
 # Simple Todo
 
-A tiny, local-first todo list. No accounts, no server, no database to babysit — every task is stored in the browser and never leaves the device.
+A tiny, local-first todo list. No accounts, no backend, no database to babysit — every task is stored in the browser and never leaves the device.
 
 Built for a CS2010 demo, but pleasant enough to actually use.
 
@@ -76,16 +76,63 @@ src/
     local.ts              localStorage fallback
     index.ts              picks the best available backend
   lib/                    small helpers
-.github/workflows/deploy.yml
+deploy/nginx/             nginx vhost used on the server
+scripts/deploy.sh         manual build + rsync deploy
+.github/workflows/ci.yml  lint, tests and build on push
 ```
 
-## Deploying to GitHub Pages
+## Deploying
 
-1. Push the repository to GitHub with `main` as the default branch.
-2. In **Settings → Pages**, set **Source** to **GitHub Actions**.
-3. Push to `main`. The workflow runs lint, tests and the build, then publishes `dist/`.
+The app is served as static files by nginx at
+**https://simple-todo.ironbeard.com**. Deploys are manual:
 
-`vite.config.ts` derives the asset base path from `GITHUB_REPOSITORY`, so project sites are served correctly from `https://<user>.github.io/<repo>/`. Repositories named `<user>.github.io` are served from the domain root automatically.
+```bash
+npm run deploy
+```
+
+This runs the production build and rsyncs `dist/` to
+`nat@simple-todo.ironbeard.com:/var/www/simple-todo`. Set `DEPLOY_HOST` or
+`DEPLOY_TARGET` to override the defaults.
+
+### One-time server setup
+
+The server already runs nginx and certbot. To recreate the setup:
+
+1. Create the web root (owned by the deploy user, readable by nginx):
+
+   ```bash
+   sudo install -d -o nat -g www-data -m 2755 /var/www/simple-todo
+   ```
+
+2. Start with only the port-80 `server` block from
+   `deploy/nginx/simple-todo.conf` in
+   `/etc/nginx/sites-available/simple-todo`, enable it, and reload nginx:
+
+   ```bash
+   sudo ln -s /etc/nginx/sites-available/simple-todo /etc/nginx/sites-enabled/
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+3. Issue the certificate while the HTTPS block is still absent:
+
+   ```bash
+   sudo certbot certonly --webroot -w /var/www/certbot \
+     -d simple-todo.ironbeard.com \
+     --deploy-hook "systemctl reload nginx"
+   ```
+
+4. Replace the vhost with the complete `deploy/nginx/simple-todo.conf`,
+   reload nginx, and confirm the renewal timer is active:
+
+   ```bash
+   sudo nginx -t && sudo systemctl reload nginx
+   systemctl list-timers | grep certbot
+   ```
+
+5. DNS for `simple-todo.ironbeard.com` must point at the server.
+
+CI (`.github/workflows/ci.yml`) runs lint, tests and the build on every push,
+but does not deploy.
 
 ## Notes
 
